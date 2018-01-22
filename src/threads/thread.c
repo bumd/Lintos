@@ -24,6 +24,9 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* Added.*/
+static struct list sleep_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -70,6 +73,10 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+
+void thread_sleep (int64_t ticks);
+static void thread_wake (void);
+static bool sleep_order (const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -585,3 +592,59 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+void 
+thread_sleep(int64_t ticks)
+{
+  enum intr_level old_level;
+  struct thread* cur = thread_current ();
+
+  ASSERT(cur->status == THREAD_RUNNING);
+
+  old_level = intr_disable ();
+
+  list_remove (&cur->elem);
+  list_insert_ordered (&sleep_list, &cur->elem, sleep_order, NULL);
+  
+  cur->wake_at = ticks + timer_ticks ();
+
+  thread_block ();
+  intr_set_level (old_level);
+}
+
+static void 
+thread_wake (void)
+{
+  struct list_elem* e;
+  struct thread* t = list_entry (list_head (&sleep_list), struct thread, elem);
+  int64_t cur_tick = timer_ticks ();
+  if ( t->wake_at < cur_tick)
+  {
+    thread_unblock (t);
+    for (e = list_head (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
+    {
+      t = list_entry (list_head (&sleep_list), struct thread, elem);
+      if (t->wake_at < cur_tick)
+      {
+        list_remove (&t->elem);
+        t->wake_at = UINT64_MAX;
+        thread_unblock (t);
+      }
+      else
+      {
+        break;
+      }
+    }
+  }
+}
+static bool
+sleep_order (const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
+{
+  uint64_t i, j;
+  i = list_entry (a, struct thread, elem)->wake_at;
+  j = list_entry (b, struct thread, elem)->wake_at;
+  if ( i < j ) return true;
+  else return false;
+}
+
+

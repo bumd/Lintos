@@ -98,6 +98,8 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+  uint64_t wake_at;
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

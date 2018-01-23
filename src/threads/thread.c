@@ -37,6 +37,7 @@ static struct thread *idle_thread;
 /* Initial thread, the thread running init.c:main(). */
 static struct thread *initial_thread;
 
+static struct semaphore sema_sleep;
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
 
@@ -74,9 +75,12 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
+/* Added. */
 void thread_sleep (int64_t ticks);
 static void thread_wake (void);
 static bool sleep_order (const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
+
+static bool priority_order(const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -99,6 +103,11 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+
+  /* init sleep components.*/
+  list_init (&sleep_list);
+  sema_init (&sema_sleep, 1);
+
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -125,7 +134,7 @@ thread_start (void)
 }
 
 /* Called by the timer interrupt handler at each timer tick.
-   Thus, this function runs in an external interrupt context. */
+   Thus, thix */
 void
 thread_tick (void) 
 {
@@ -140,10 +149,12 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
+  thread_wake ();
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
+  {
     intr_yield_on_return ();
+  }
 }
 
 /* Prints thread statistics. */
@@ -252,7 +263,17 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
+  /*
   list_push_back (&ready_list, &t->elem);
+  */
+  if(list_empty (&ready_list))
+  {
+    list_push_back (&ready_list, &t->elem);
+  }
+  else
+  {
+    list_insert_ordered(&ready_list, &t->elem, priority_order, NULL);
+  }
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -475,6 +496,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->wake_at = 0;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -600,14 +622,16 @@ thread_sleep(int64_t ticks)
   struct thread* cur = thread_current ();
 
   ASSERT(cur->status == THREAD_RUNNING);
-
-  old_level = intr_disable ();
+  cur->wake_at = ticks + timer_ticks ();
+  
+  sema_down(&sema_sleep);
 
   list_remove (&cur->elem);
   list_insert_ordered (&sleep_list, &cur->elem, sleep_order, NULL);
   
-  cur->wake_at = ticks + timer_ticks ();
+  sema_up(&sema_sleep);
 
+  old_level = intr_disable ();
   thread_block ();
   intr_set_level (old_level);
 }
@@ -616,18 +640,19 @@ static void
 thread_wake (void)
 {
   struct list_elem* e;
-  struct thread* t = list_entry (list_head (&sleep_list), struct thread, elem);
   int64_t cur_tick = timer_ticks ();
-  if ( t->wake_at < cur_tick)
+  sema_down(&sema_sleep);
+  struct thread* t = list_entry (list_head (&sleep_list), struct thread, elem);
+  
+  if (t->wake_at < cur_tick)
   {
-    thread_unblock (t);
     for (e = list_head (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
     {
       t = list_entry (list_head (&sleep_list), struct thread, elem);
-      if (t->wake_at < cur_tick)
+      if (t->wake_at <= cur_tick)
       {
         list_remove (&t->elem);
-        t->wake_at = UINT64_MAX;
+        t->wake_at = 0;
         thread_unblock (t);
       }
       else
@@ -636,6 +661,7 @@ thread_wake (void)
       }
     }
   }
+  sema_up(&sema_sleep);
 }
 static bool
 sleep_order (const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
@@ -644,6 +670,16 @@ sleep_order (const struct list_elem* a, const struct list_elem* b, void* aux UNU
   i = list_entry (a, struct thread, elem)->wake_at;
   j = list_entry (b, struct thread, elem)->wake_at;
   if ( i < j ) return true;
+  else return false;
+}
+
+bool
+priority_order(const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
+{
+  int i, j;
+  i = list_entry (a, struct thread, elem)->priority;
+  j = list_entry (b, struct thread, elem)->priority;
+  if (i < j) return true;
   else return false;
 }
 

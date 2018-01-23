@@ -88,6 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int priority_prev;                  /* Determine priority donation occured.*/
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -142,6 +143,6 @@ int thread_get_load_avg (void);
 
 bool priority_order (const struct list_elem* a, const struct list_elem* b, void* aux UNUSED);
 
-void priority_donate (struct lock* lock, bool donate);
+void priority_donate (struct lock* lock);
 void priority_restore (struct lock* lock);
 #endif /* threads/thread.h */

@@ -496,7 +496,9 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+
   t->wake_at = 0;
+  t->priority_prev = -1;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -626,7 +628,6 @@ thread_sleep(int64_t ticks)
   
   sema_down(&sema_sleep);
 
-  list_remove (&cur->elem);
   list_insert_ordered (&sleep_list, &cur->elem, sleep_order, NULL);
   
   sema_up(&sema_sleep);
@@ -681,6 +682,59 @@ priority_order(const struct list_elem* a, const struct list_elem* b, void* aux U
   j = list_entry (b, struct thread, elem)->priority;
   if (i < j) return true;
   else return false;
+}
+
+void
+priority_donate (struct lock* lock)
+{
+  struct thread* holder = lock->holder;
+  struct thread* waiter;
+  int temp;
+  if (list_empty (&lock->semaphore.waiters))
+  {
+    return;
+  }
+  else if( lock->holder != NULL ) // if not first lock entry.
+  {
+    waiter = list_entry (list_back (&lock->semaphore.waiters), struct thread, elem); // semaphore list is sorted.
+    if (thread_current ()->priority > waiter->priority)
+    {
+      waiter = thread_current ();
+    }
+    
+    if (holder->priority > waiter->priority)
+    {
+      return;
+    }
+    else
+    {
+      holder->priority_prev = holder->priority;
+      waiter->priority_prev = waiter->priority;
+
+      temp = holder->priority;
+      holder->priority = waiter->priority;
+      waiter->priority = temp;
+    }
+  }
+}
+
+void 
+priority_restore (struct lock* lock)
+{
+  if (lock->holder->priority_prev == -1)
+  {
+    return;
+  }
+  else
+  {
+    struct thread* waiter = list_entry (list_back(&lock->semaphore.waiters), struct thread, elem);
+    
+    lock->holder->priority = lock->holder->priority_prev;
+    lock->holder->priority_prev = -1;
+    
+    waiter->priority = waiter->priority_prev;
+    waiter->priority_prev = -1;
+  }
 }
 
 

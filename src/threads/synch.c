@@ -61,7 +61,7 @@ void
 sema_down (struct semaphore *sema) 
 {
   enum intr_level old_level;
-
+  
   ASSERT (sema != NULL);
   ASSERT (!intr_context ());
 
@@ -69,7 +69,6 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       //list_push_back (&sema->waiters, &thread_current ()->elem);
-      list_remove (&thread_current ()->elem); // remove current thread from ready list at first time. second time, remove from the waiters.
       list_insert_ordered(&sema->waiters, &thread_current ()->elem, priority_order, NULL); // insert current thread to waiters
       thread_block ();
     }

@@ -14,6 +14,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "threads/fixed.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -53,6 +54,7 @@ struct kernel_thread_frame
 static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
+static long long load_avg;
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
@@ -114,6 +116,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  /* start counting load. */
+  load_avg = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -148,12 +152,19 @@ thread_tick (void)
     user_ticks++;
 #endif
   else
+  {
     kernel_ticks++;
+  }
   thread_wake ();
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
   {
     intr_yield_on_return ();
+    
+    if(t->nice < 21)
+    {
+      t->nice++;
+    }
   }
 }
 
@@ -393,7 +404,7 @@ int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
@@ -499,6 +510,8 @@ init_thread (struct thread *t, const char *name, int priority)
 
   t->wake_at = 0;
   t->priority_prev = -1;
+  t->nice = 0;
+
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -642,9 +655,14 @@ thread_wake (void)
 {
   struct list_elem* e;
   int64_t cur_tick = timer_ticks ();
-  sema_down(&sema_sleep);
-  struct thread* t = list_entry (list_head (&sleep_list), struct thread, elem);
-  
+  struct thread* t = NULL;
+  enum intr_level old_level = intr_disable();
+  if(list_empty (&sleep_list))
+  {
+    return;
+  }
+
+  t = list_entry (list_head (&sleep_list), struct thread, elem);
   if (t->wake_at < cur_tick)
   {
     for (e = list_head (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
@@ -662,7 +680,8 @@ thread_wake (void)
       }
     }
   }
-  sema_up(&sema_sleep);
+
+  intr_set_level (old_level);
 }
 static bool
 sleep_order (const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
@@ -736,5 +755,4 @@ priority_restore (struct lock* lock)
     waiter->priority_prev = -1;
   }
 }
-
 

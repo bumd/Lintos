@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "threads/fixed.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -88,8 +89,10 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
+
     int priority;                       /* Priority. */
     int priority_prev;                  /* Determine priority donation occured.*/
+    
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -100,7 +103,10 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
-    uint64_t wake_at;                   /* time that this thread wake up at .*/
+    int64_t wake_at;                   /* time that this thread wake up at .*/
+    int nice;
+    fp_t recent_cpu;
+    
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

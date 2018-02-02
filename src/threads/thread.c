@@ -15,6 +15,7 @@
 #include "userprog/process.h"
 #endif
 #include "threads/fixed.h"
+#include "devices/timer.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -79,10 +80,10 @@ static tid_t allocate_tid (void);
 
 /* Added. */
 void thread_sleep (int64_t ticks);
-static void thread_wake (void);
-static bool sleep_order (const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
+void thread_wake (void);
+bool sleep_order (const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
 
-static bool priority_order(const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
+bool priority_order(const struct list_elem* a, const struct list_elem* b, void* AUX UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -155,7 +156,6 @@ thread_tick (void)
   {
     kernel_ticks++;
   }
-  thread_wake ();
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
   {
@@ -637,8 +637,7 @@ thread_sleep(int64_t ticks)
   struct thread* cur = thread_current ();
 
   ASSERT(cur->status == THREAD_RUNNING);
-  cur->wake_at = ticks + timer_ticks ();
-  
+  cur->wake_at = ticks;
   sema_down(&sema_sleep);
 
   list_insert_ordered (&sleep_list, &cur->elem, sleep_order, NULL);
@@ -650,22 +649,23 @@ thread_sleep(int64_t ticks)
   intr_set_level (old_level);
 }
 
-static void 
+void 
 thread_wake (void)
 {
   struct list_elem* e;
   int64_t cur_tick = timer_ticks ();
   struct thread* t = NULL;
   enum intr_level old_level = intr_disable();
+
   if(list_empty (&sleep_list))
   {
     return;
   }
-
+  sema_down (&sema_sleep);
   t = list_entry (list_head (&sleep_list), struct thread, elem);
   if (t->wake_at < cur_tick)
   {
-    for (e = list_head (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
+    for (e = list_begin (&sleep_list); e != list_end (&sleep_list); e = list_next (e))
     {
       t = list_entry (list_head (&sleep_list), struct thread, elem);
       if (t->wake_at <= cur_tick)
@@ -680,10 +680,11 @@ thread_wake (void)
       }
     }
   }
-
+  sema_up (&sema_sleep);
   intr_set_level (old_level);
 }
-static bool
+
+bool
 sleep_order (const struct list_elem* a, const struct list_elem* b, void* aux UNUSED)
 {
   uint64_t i, j;
@@ -711,7 +712,7 @@ priority_donate (struct lock* lock)
   int temp;
   if (list_empty (&lock->semaphore.waiters))
   {
-    return;
+    return; // Since the lock is holding by alone, no need to change priority.
   }
   else if( lock->holder != NULL ) // if not first lock entry.
   {
